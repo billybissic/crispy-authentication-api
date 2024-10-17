@@ -1,0 +1,364 @@
+import express, {Request} from 'express';
+import bodyParser from 'body-parser';
+import {initModels, user_devices, user_logs, user_tokens, users} from "../../models/init-models"
+import sequelize from "../../config/sequelize";
+import {ensureTokenHelper} from "../../helpers/ensureToken.helper";
+import {AuthenticationHelper} from "../../helpers/authentication.helper";
+
+// import models into sequelize instance
+initModels(sequelize);
+/*
+import jwt from 'jsonwebtoken';
+import {TokenHelper} from "../../helpers/token";
+import geoip from 'geoip-lite';
+import si from 'systeminformation';
+*/
+
+const authenticateRouter = express.Router();
+const authenticationHelper = new AuthenticationHelper();
+
+/* configure token helper */
+authenticationHelper.set_password_length(12);
+authenticationHelper.enable_numbers_in_passwords();
+authenticationHelper.set_salt_rounds(8);
+authenticationHelper.set_secret_key('kickboxer1989');
+authenticationHelper.set_validate_device_on_login(true);
+authenticationHelper.set_validate_browser_on_login(true);
+
+
+authenticateRouter.use(bodyParser.json());
+
+// create application/x-www-form-urlencoded parser
+const urlencodedParser = bodyParser.urlencoded({extended: false})
+
+authenticateRouter.get('/', urlencodedParser, async (req, res,
+                                                     next) => {
+
+    console.log('Headers: ' + JSON.stringify(req.headers));
+
+    //const [geo] = await geo.iplookup(req.ip);
+    //console.log("IP: " [geo]);
+
+    const [browser] = await Promise.all([req.headers["user-agent"]]);
+    console.log("Browser: " [browser]);
+
+    console.log("Browser: " + req.headers["user-agent"]);
+    console.log("Language: " + req.headers["accept-language"]);
+    /* console.log("Country: " + (geo ? geo.country : "Unknown"));
+     console.log("Region: " + (geo ? geo.region : "Unknown"));*/
+    /*
+        console.log("CPU Information: " + await si.cpu().then(data => console.log(data)))   ;
+        console.log("Memory Information: " + await si.mem().then(data => console.log(data)));
+        console.log("Network Information: " + await si.networkInterfaces().then(data => console.log(data)));
+        console.log("Disk Information: " + await si.diskLayout().then(data => console.log(data)));
+        console.log("Battery Information: " + await si.battery().then(data => console.log(data)));
+        console.log("Graphics Information: " + await si.graphics().then(data => console.log(data)));
+        console.log("OS Information: " + await si.osInfo().then(data => console.log(data)));
+        console.log("Shell Information: " + await si.shell().then(data => console.log(data)));
+        console.log("Users Information: " + await si.users().then(data => console.log(data)));
+        console.log("Processes Information: " + await si.processes().then(data => console.log(data)));
+        console.log("Version Information: " + await si.versions().then(data => console.log(data)));
+        console.log("Time Information: " + si.time());
+        console.log("Network Stats Information: " + await si.networkStats().then(data => console.log(data)));
+        console.log("Network Connections Information: " + await si.networkConnections().then(data => console.log(data)));
+        console.log("Current Load Information: " + await si.currentLoad().then(data => console.log(data)));
+        console.log("Full Load Information: " + await si.fullLoad().then(data => console.log(data)));
+        console.log("Disk IO Information: " + await si.disksIO().then(data => console.log(data)));
+        console.log("Network Interfaces Information: " + await si.networkInterfaces().then(data => console.log(data)));
+    */
+    // console.log(geo);
+
+    res.status(200);
+    res.header("Content-Type", 'application/json');
+    res.json(JSON.stringify({
+        response_title: "Crispy Authentication Router V1 - Authentication API",
+        requester_ip: req.ip,
+        /*requester_country: (geo ? geo.country : "Unknown"),
+        requester_region: (geo ? geo.region : "Unknown"),*/
+        requester_browser: req.headers["user-agent"],
+        requester_language: req.headers["accept-language"],
+        response_status: "OK"
+    }));
+
+    next(res);
+});
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export async function loginRoute(req: Request) {
+
+    req.body
+    console.log("req.body", req.body);
+
+
+    return authenticateRouter.post('/login', urlencodedParser,
+        async (req, res,
+               next) => {
+
+            try {
+                console.log("req.body", req.body);
+                const _username = req.body.username;
+                const _password = req.body.password;
+                console.log("_username: ", _username);
+                console.log("_password", _password);
+
+                /* is user in database */
+                await users.findOne({where: {username: _username}}).then(async (user: users) => {
+
+                    /* retrieved user from database validating names */
+                    console.log("username from db: ", user.username);
+
+                    /* validate username */
+                    if (user.username === _username) {
+
+                        /* usernames matched validating password */
+                        if (user.password === _password) {
+
+                            /* password matched - beginning final validations for authentication */
+                            console.log("Password Matched - beginning validation process...");
+
+                            /* retrieve user device list */
+                            await user_devices.findByPk(user.uuid).then(async devices => {
+
+                                /* validate device */
+                                console.log("user_devices: ", devices)
+
+                                await authenticationHelper.hasUserUsedDeviceBefore(devices, req.headers["user-agent"])
+                                if (await authenticationHelper.hasUserUsedDeviceBefore(devices, req.headers["user-agent"])) {
+                                    console.log("Device Matched: ");
+
+                                    /* these validations are executed if the validations are in hyper mode */
+                                    /* validate browser */
+                                    /* validate ip */
+
+                                } else {
+                                    console.log("Device Mismatched: ", devices.device_name);
+                                    /* require 2FA to be configured */
+
+                                    /* check if users 2FA validation is configured in users table */
+                                    if (user.is_2fa_configured == 0) {
+                                        console.log("2FA not configured - require 2FA setup");
+
+                                    } else {
+                                        /* require 2FA since device is not recognized */
+                                        console.log("2FA is configured - initiating 2FA validation");
+                                        /* redirecting to 2FA authentication page  */
+                                        res.status(200);
+                                        res.header("Content-Type", 'application/json');
+                                        res.json(JSON.stringify({
+                                            response_title: "Crispy Authentication Router V1 - Authentication API - " +
+                                                "Login Route - 2FA Required - Redirect to 2FA Page",
+                                            response_status: "OK"
+                                        }));
+                                        next(res);
+                                    }
+                                }
+                            }).catch(error => {
+                                console.error("Error finding device: ", error);
+                                /* if user has no devices and the account creation date is within
+                                   the last 30 days add the current device, otherwise require user
+                                   to set up 2FA and use it.
+                                 */
+                            })
+
+                            console.log("Validation Process Complete - beginning authentication process ...")
+
+                            /* - authenticate user process - */   /* create identity token for session */
+
+                            /* create identity token for session */
+                            const user_identity_token = authenticationHelper.generateIdentityToken();
+                            console.log("User Identity Token: ", user_identity_token);
+
+                            /* create session */
+                            await user_tokens.create({
+                                //user_id: user.uuid,
+                                //token: user_identity_token
+                            }).then(token => {
+
+                                console.log("Token Created: ", token);
+
+                                res.status(200);
+                                res.header("Content-Type", 'application/json');
+                                res.json(JSON.stringify({
+                                    response_title: "Crispy Authentication Router V1 - Authentication API - Login Route",
+                                    response_status: "OK"
+                                }));
+                                next(res);
+                            }).catch(error => {
+                                res.status(200);
+                                res.header("Content-Type", 'application/json');
+                                res.json(JSON.stringify({
+                                    response_title: "Crispy Authentication Router V1 - Authentication API - Login Route",
+                                    response_status: "Internal Server Error"
+                                }));
+                                console.error("Error creating token: ", error)
+                                next(res)
+                            });
+                            console.log(user.password)
+                            /* update user logs */
+                        } else {
+                            console.log('Password did not match password on file.');
+
+                            /* update user login fail attempt in users table */
+                            await users.update({
+                                failed_login_attempts: user.failed_login_attempts + 1
+                            }, {
+                                where: {username: _username}
+                            }).then(() => {
+                                console.log('Login Fail Attempts Updated');
+
+                                /* writing to user logs */
+                                user_logs.create({
+                                    user_id: user.id,
+                                    log_title: 'login',
+                                    log_text: 'Failed Login Attempt'
+                                }).then(log => {
+                                    console.log('User Log Created: ', log);
+                                }).catch(error => {
+                                    console.error('Error creating user log: ', error);
+                                });
+
+                            }).catch(error => {
+                                console.error('Error updating login fail attempts: ', error);
+                                res.status(401);
+                                res.header("Content-Type", 'application/json');
+                                res.json(JSON.stringify({
+                                    response_title: "Crispy Authentication Router V1 - Authentication API - Login Route",
+                                    response_status: "Unauthorized Username or Password incorrect."
+                                }));
+                                next(res);
+                            });
+                        }
+                    } else {
+                        console.log('User Not Found');
+                        res.status(401);
+                        res.header("Content-Type", 'application/json');
+                        res.json(JSON.stringify({
+                            response_title: "Crispy Authentication Router V1 - Authentication API - Login Route",
+                            response_status: "Unauthorized Username or Password incorrect."
+                        }));
+                        next(res);
+                    }
+                });
+            } catch (error) {
+                console.error('Error finding user:', error);
+                res.status(500).json({
+                    response_title: "Crispy Authentication Router V1 - Authentication API - Login Route",
+                    response_status: "Internal Server Error"
+                });
+                next(res)
+            }
+        });
+}
+
+authenticateRouter.post('/login', urlencodedParser, (req) => {
+    loginRoute(req);
+});
+
+authenticateRouter.post('/register', async (req, res, next) => {
+    const _username = req.body.username;
+    const _password = req.body.password;
+    const _uuid = '' /* generate id */
+
+    /* validate if password meets criteria */
+    authenticationHelper.set_password('_password');
+    const is_password_valid = authenticationHelper.validate_password(_password);
+    if (is_password_valid) {
+
+        /* encrypt password */
+        await authenticationHelper.encryptPasswordForStorage()
+            .then(async hashedPassword => {
+                console.log("Hashed Password:", hashedPassword)
+
+                /*store encrypted password */
+                await users.create({
+                    uuid: _uuid,
+                    username: _username,
+                    password: authenticationHelper.get_encrypted_password()
+
+                }).then(user => {
+                    console.log("User created with username: ", user.username)
+                    res.status(200)
+                    res.header("Content-Type", 'application/json');
+                    res.json(JSON.stringify({
+                        response_title: "Crispy Authentication Router V1 - Authentication API - Registration Route",
+                        response_status: "OK"
+                    }));
+                    next(res);
+
+                }).catch(error => {
+                    console.error("Error creating user: ", error)
+                });
+            })
+            .catch(error => {
+                console.error("Internal Server Error password: ", error)
+            });
+    } else {
+        res.status(400)
+        res.header("Content-Type", 'application/json');
+        res.json(JSON.stringify({
+            response_title: "Crispy Authentication Router V1 - Authentication API - Registration Route",
+            response_status: "Bad Password - Does not meet requirements."
+        }));
+        next(res);
+    }
+});
+
+authenticateRouter.post('/logout', (req, res, next) => {
+    res.status(200)
+    res.header("Content-Type", 'application/json');
+    res.json(JSON.stringify({
+        response_title: "Crispy Authentication Router V1 - Authentication API - Logout Route",
+        response_status: "OK"
+    }));
+    next(res);
+});
+
+authenticateRouter.post('/forgot-password', (req, res, next) => {
+    res.status(200)
+    res.header("Content-Type", 'application/json');
+    res.json(JSON.stringify({
+        response_title: "Crispy Authentication Router V1 - Authentication API - Forgot Password Route",
+        response_status: "OK"
+    }));
+    next(res);
+});
+
+authenticateRouter.post('/reset-password', (req, res, next) => {
+    /* validate users credentials */
+
+    /* if credentials are valid check to see if 2fa authentication is required */
+
+    /* if 2fa is required redirect to 2fa page */
+
+    /* else redirect to reset password page */
+
+    res.status(200)
+    res.header("Content-Type", 'application/json');
+    res.json(JSON.stringify({
+        response_title: "Crispy Authentication Router V1 - Authentication API - Reset Password Route",
+        response_status: "OK"
+    }));
+    next(res);
+});
+
+authenticateRouter.post('/refresh-token', (req, res, next) => {
+    res.status(200)
+    res.header("Content-Type", 'application/json');
+    res.json(JSON.stringify({
+        response_title: "Crispy Authentication Router V1 - Authentication API - Refresh Token Route",
+        response_status: "OK"
+    }));
+    next(res);
+});
+
+authenticateRouter.post('/validate-email/', ensureTokenHelper, async (req, res, next) => {
+    res.status(200)
+    res.header("Content-Type", 'application/json');
+    res.json(JSON.stringify({
+        response_title: "Crispy Authentication Router V1 - Authentication API - Validate Email Route",
+        response_status: "OK"
+    }));
+    next(res);
+});
+
+export default authenticateRouter;
